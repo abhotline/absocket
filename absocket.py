@@ -110,6 +110,8 @@ async def trigger_fireworks():
             await manager.broadcast({"action": "fireworks"})
     return {"message": "Fireworks triggered"}
 
+
+@app.get("/update_progress")
 @app.post("/update_progress")
 async def update_value():
     """Update progress value and notify clients."""
