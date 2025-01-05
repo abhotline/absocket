@@ -3,17 +3,21 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from typing import List
 from functions import *
 from datetime import datetime,timedelta
+import os
+
 
 
 app = FastAPI()
 
 # Global configuration
-SHEET_ID = "1EAl0Pb-ehUa8iX_f6O265Kdjkf0UIsRkZLEVNdW7bVo"
+SHEET_ID = os.getenv("SHEET_ID")
+
 
 current_value = {"show_progress": get_spreadsheet_target(SHEET_ID)}
 items = {}
 target_amount = 2000
 current_amount = 0
+current_page = 0
 
 # Dependency for database session
 
@@ -51,9 +55,10 @@ async def update_ui(donorid: str):
 
     try:
         pledge = get_pledge_by_id(int(donorid))
-        passdict = {pledge["name"]: pledge["amount"]}
-        await update_items(passdict)
-        if get_spreadsheet_target(SHEET_ID):
+        print(pledge)
+        passdict = {pledge["id"]:({pledge["name"]: pledge["amount"]})}
+        await update_items(passdict,True,donorid)
+        if get_spreadsheet_target(SHEET_ID) == 'TRUE':
             await increment_progress()
     except Exception as e:
         print(f"Error processing donor ID: {e}")
@@ -64,18 +69,27 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint to manage real-time updates."""
     await manager.connect(websocket)
     try:
-        pledges = get_all_pledges()
         
-        item_data = {pledge["name"]: pledge["amount"] for pledge in pledges}
-        
-        await update_items(item_data)
         await update_value()
         await increment_progress()
+        
         await total_donation()
-        if get_spreadsheet_target(SHEET_ID):
+        if get_spreadsheet_target(SHEET_ID)=='TRUE':
             await set_target()
             await increment_progress()
+        
+        pledges = get_all_pledges()
+        if pledges:
+    
+            item_data = {pledge["id"]:({pledge["name"]: pledge["amount"]}) for pledge in pledges}
+            print(item_data)
+            
+            await update_items(item_data)
 
+        else:
+            item_data = {}
+            await update_items(item_data)
+       
         while True:
             try:
                 await websocket.receive_text()
@@ -87,27 +101,35 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket error: {e}")
 
+@app.get("/trigger_confetti")
 @app.post("/trigger_confetti")
 async def trigger_confetti():
     """Trigger confetti on the frontend."""
-    try:
-        mettimestamp = check_met_at(1)
-        if mettimestamp:
-            if check_time_period(mettimestamp, timedelta(minutes=1)):
-
-                await manager.broadcast({"action": "confetti"})
-
-    except Exception as e:
-            pass
+    await manager.broadcast({"action": "confetti"})
+    
     return {"message": "Confetti triggered"}
 
+@app.get("/get_current_page")
+async def get_current_page():
+    """Get the current page number."""
+    global current_page
+    return {"current_page": current_page}
+
+@app.post("/set_current_page")
+async def set_current_page(page: int):
+    """Set the current page number."""
+    global current_page
+    current_page = page
+    await manager.broadcast({"action": "update_page", "current_page": current_page})
+    return {"message": f"Current page set to {current_page}"}
+
+
+@app.get("/trigger_fireworks")
 @app.post("/trigger_fireworks")
 async def trigger_fireworks():
     """Trigger fireworks on the frontend."""
-    if check_met_at(1):
-        if check_time_period(check_met_at(1), timedelta(minutes=1)):
-
-            await manager.broadcast({"action": "fireworks"})
+    await manager.broadcast({"action": "fireworks"})
+    
     return {"message": "Fireworks triggered"}
 
 
@@ -118,14 +140,16 @@ async def update_value():
     global current_value
     current_value["show_progress"] = get_spreadsheet_target(SHEET_ID)
     
-    if get_spreadsheet_target(SHEET_ID):
+    if get_spreadsheet_target(SHEET_ID)=="TRUE":
         goal = extract_number(gettargetnumber(SHEET_ID, get_spreadsheet_goalnumber(SHEET_ID)))
         add_or_update_donation(1,0, goal,True)
         await set_target()
-        print(f"Progress updated: {current_value}")
+        # print(f"Progress updated: {current_value}")
         await manager.broadcast({"action": "update_p", "cur": current_value})
         return {"message": "Progress updated"}
     else:
+       
+        await total_donation()
         await manager.broadcast({"action": "update_p", "cur": current_value})
 
 @app.post("/set_target")
@@ -156,7 +180,9 @@ async def increment_progress():
 async def total_donation():
     """Get the total donation amount."""
     total=gettotal()
-    print("dxfgchjklfgh",total)
+    if total is None:
+        total=0
+    # print("dxfgchjklfgh",total)
     message= {
   "action": "totaldonation",
     "total": total
@@ -165,39 +191,113 @@ async def total_donation():
     return {"total": total}
 
 @app.post("/update_items")
-async def update_items(item: dict):
+async def update_items(item: dict,switch=None,donorid=None):
     """Broadcast item updates and calculate pagination."""
     global items
-    items.update(item)
+    if not switch:
+        if item=={}:
+            message = {
+            "action": "update_items",
+            "item": None,
+           
+        }
+            await manager.broadcast(message)
+            return {"message": "Item updates broadcasted"}
+        items.update(item)
+        # print(items)
 
-    items_per_page = 9
-    total_items = len(items)
-    
-    total_pages = (total_items + items_per_page - 1) // items_per_page
-    current_page = max(total_pages - 1, 0)
+        items_per_page = 9
+        total_items = len(items)
+        
+        total_pages = 0
+        if total_items//items_per_page and total_items%items_per_page==0:
+            total_pages = total_items//items_per_page-1
+        else:
+            total_pages = total_items//items_per_page
+        
+       
 
-    
+        
 
-    if get_spreadsheet_target(SHEET_ID)==True:
+        if get_spreadsheet_target(SHEET_ID)=='TRUE':
 
-        await increment_progress()
-        # print(getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)))
-        if getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)).lower()=='confetti':
-            await trigger_confetti()
-        elif getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)).lower()=='fireworks':
-            await trigger_fireworks()
+            await increment_progress()
+            
+        else:
+            await total_donation()
+                
+
+        message = {
+            "action": "update_items",
+            "item": item,
+            "page":total_pages
+        }
+        # print(f"Updated item: {item}, Page: {current_page}, Total Pages: {total_pages}")
+        await manager.broadcast(message)
+        return {"message": "Item updates broadcasted"}
     else:
-        await total_donation()
+        items.update(item)
+        print("SINGLE ITEM",item)
+        itemammount=float(list(item[int(donorid)].values())[0])
+        print(itemammount)
+        items_per_page = 9
+        total_items = len(items)
+        
+        total_pages = 0
+        if total_items//items_per_page and total_items%items_per_page==0:
+            total_pages = total_items//items_per_page-1
+        else:
+            total_pages = total_items//items_per_page
+        
+
+        message = {
+            "action": "update_items",
+            "item": item,
+            "page":total_pages
+        }
+        # print(f"Updated item: {item}, Page: {current_page}, Total Pages: {total_pages}")
+        await manager.broadcast(message)
+        
+
+
+        spreadshhetfireworks=clean_text_to_int(get_pledgeconfetti(SHEET_ID))
+        spreadshhetconfetti=clean_text_to_int(get_pledgefirework(SHEET_ID))
+        
+    
+        
+        if itemammount>=spreadshhetconfetti and itemammount>spreadshhetfireworks:
+            
+            await trigger_confetti()
+        elif itemammount>=spreadshhetfireworks and itemammount<spreadshhetconfetti:
+            
+            await trigger_fireworks()
+        # print(items)
+
+        
+       
+        print("spreadsheettarget",get_spreadsheet_target(SHEET_ID))
+
+        if get_spreadsheet_target(SHEET_ID)=='TRUE':
             
 
-    message = {
-        "action": "update_items",
-        "item": item,
-        "pagination": {
-            "current_page": current_page,
-            "total_pages": total_pages
-        }
-    }
-    # print(f"Updated item: {item}, Page: {current_page}, Total Pages: {total_pages}")
-    await manager.broadcast(message)
-    return {"message": "Item updates broadcasted"}
+            await increment_progress()
+            print("i am here")
+            confetti_target_bool=checktarget(1)
+            print("confetti_target_bool",confetti_target_bool)
+            print("getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID))",getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)))
+        
+            # print(getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)))
+            if getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)).lower()=='confetti':
+                if confetti_target_bool:
+                    await trigger_confetti()
+                
+            elif getcelebrationnumber(SHEET_ID,get_spreadsheet_goalnumber(SHEET_ID)).lower()=='fireworks':
+                if confetti_target_bool:
+                    await trigger_fireworks()
+        else:
+            
+            await total_donation()
+                
+
+        
+        return {"message": "Item updates broadcasted"}

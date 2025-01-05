@@ -7,11 +7,12 @@ from supabase import create_client, Client
 from datetime import datetime
 from typing import Optional
 import pytz
+import os
 
 
 # Initialize Supabase client
-supabase_url = "https://htjfvxtqbbwsdyupnosk.supabase.co"  # Replace with your Supabase URL
-supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0amZ2eHRxYmJ3c2R5dXBub3NrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczNTczNjgyMiwiZXhwIjoyMDUxMzEyODIyfQ.lq-SHM1yd_TXehhUQOLGreYiD1f9s_4IUvdXwfNXkEc"  # Replace with your Supabase API Key
+supabase_url = os.getenv("SUPABASE_URL") # Replace with your Supabase URL
+supabase_key = os.getenv("SUPABASE_KEY")  # Replace with your Supabase API Key
 supabase: Client = create_client(supabase_url, supabase_key)
 
 def add_or_update_donation(id: int, value: float, target: Optional[float] = None, reset_met_at: Optional[bool] = False):
@@ -47,9 +48,12 @@ def add_or_update_donation(id: int, value: float, target: Optional[float] = None
             insert_result = supabase.table("donations").insert(new_donation).execute()
             return {"success": True, "data": insert_result.data}
         
+        print(data[0]["value"],"function data value")
         # If the record exists, update the 'value' column
         existing_value = float(data[0]["value"])  # Convert existing value to float
-        updated_value = 0 if value == 0 else existing_value + value  # Update the value if not zero
+        print(existing_value,"function existing value")
+        updated_value = existing_value + value  # Update the value if not zero
+        print(updated_value,"function updated value")
 
         # Prepare the update data
         update_data = {"value": str(updated_value)}  # Save value as text
@@ -105,6 +109,29 @@ def check_met_at(id: int):
         return 
     
 
+def checktarget(donation_id: int):
+    """
+    Fetches a record from the 'donations' table by ID.
+
+    Args:
+        donation_id (int): The ID of the donation record to fetch.
+
+    Returns:
+        tuple: A tuple containing the 'value' and 'target' fields, or None if not found.
+    """
+    response = supabase.table("donations").select("value, target").eq("id", donation_id).execute()
+    
+    if response.data:
+        row = response.data[0]
+        print(row.get("value"), row.get("target"))
+        if float(row.get("value"))>=float(row.get("target")):
+            return True
+        else:
+            return 
+        
+    return
+    
+
 def check_time_period(timestamp_str, period_allowed):
     # Convert the timestamp string to a datetime object
     timestamp = datetime.fromisoformat(timestamp_str)
@@ -145,6 +172,8 @@ def get_all_pledges():
     
 def gettotal():
     k=get_all_pledges()
+    if k is None:
+        return
     totaldonations=sum([float(i['amount']) for i in k])
     return totaldonations
 
@@ -302,3 +331,65 @@ def get_spreadsheet_target(sheet_id):
     # Extract and return the email from the second column (B2)
     email = data.iloc[0, 10]  # Assuming B2 corresponds to index 0, column 1
     return email
+
+def get_pledgeconfetti(sheet_id):
+    """
+    Fetches the email from cell B2 of a public Google Sheet.
+    
+    Parameters:
+        sheet_id (str): The ID of the Google Sheet (found in the sheet's URL).
+    
+    Returns:
+        str: The email from cell B2.
+    """
+    # Construct the CSV URL
+    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    
+    # Read the data into a DataFrame
+    data = pd.read_csv(csv_url)
+    
+    # Extract and return the email from the second column (B2)
+    email = data.iloc[2, 10]  # Assuming B2 corresponds to index 0, column 1
+    return email
+
+def get_pledgefirework(sheet_id):
+    """
+    Fetches the email from cell B2 of a public Google Sheet.
+    
+    Parameters:
+        sheet_id (str): The ID of the Google Sheet (found in the sheet's URL).
+    
+    Returns:
+        str: The email from cell B2.
+    """
+    # Construct the CSV URL
+    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    
+    # Read the data into a DataFrame
+    data = pd.read_csv(csv_url)
+    
+    # Extract and return the email from the second column (B2)
+    email = data.iloc[3, 10]  # Assuming B2 corresponds to index 0, column 1
+    return email
+
+
+def clean_text_to_int(text):
+    """
+    Cleans a text string representing a monetary value and converts it to an integer.
+    
+    Parameters:
+        text (str): The text to clean, e.g., '$50.00'.
+    
+    Returns:
+        int: The integer value of the monetary amount.
+    """
+    try:
+        # Remove the dollar sign and any commas
+        cleaned_text = text.replace('$', '').replace(',', '')
+        # Convert to a float, then to an integer
+        return int(float(cleaned_text))
+    except ValueError:
+        raise ValueError("Invalid input: ensure the text represents a valid monetary amount.")
+
+
+
