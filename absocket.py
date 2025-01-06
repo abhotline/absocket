@@ -144,6 +144,7 @@ async def update_value():
         goal = extract_number(gettargetnumber(SHEET_ID, get_spreadsheet_goalnumber(SHEET_ID)))
         add_or_update_donation(1,0, goal,True)
         await set_target()
+        await increment_progress()
         # print(f"Progress updated: {current_value}")
         await manager.broadcast({"action": "update_p", "cur": current_value})
         return {"message": "Progress updated"}
