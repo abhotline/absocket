@@ -64,6 +64,8 @@ async def update_ui(donorid: str):
         print(f"Error processing donor ID: {e}")
     return {"message": "Donor ID received"}
 
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint to manage real-time updates."""
@@ -92,7 +94,12 @@ async def websocket_endpoint(websocket: WebSocket):
        
         while True:
             try:
-                await websocket.receive_text()
+                message = await websocket.receive_text()
+                print(f"Received message: {message}")
+                
+                if message == "ping":
+                    # Respond with "pong"
+                    await websocket.send_text("pong")
             except RuntimeError:
                 break
 
